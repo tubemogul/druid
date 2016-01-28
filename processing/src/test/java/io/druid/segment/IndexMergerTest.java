@@ -40,6 +40,7 @@ import io.druid.segment.data.IncrementalIndexTest;
 import io.druid.segment.data.RoaringBitmapSerdeFactory;
 import io.druid.segment.incremental.IncrementalIndex;
 import io.druid.segment.incremental.IncrementalIndexAdapter;
+import io.druid.segment.incremental.IndexSizeExceededException;
 import io.druid.segment.incremental.OnheapIncrementalIndex;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -50,9 +51,11 @@ import org.junit.runners.Parameterized;
 
 import javax.annotation.Nullable;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -176,6 +179,50 @@ public class IndexMergerTest
     assertDimCompression(index, indexSpec.getDimensionCompressionStrategy());
 
     Assert.assertEquals(segmentMetadata, index.getMetaData());
+  }
+
+  @Test
+  public void multipleNulls() throws IOException
+  {
+    final long timestamp = System.currentTimeMillis();
+    IncrementalIndex toPersist1 = IncrementalIndexTest.createIndex(true, null);
+    toPersist1.add(
+        new MapBasedInputRow(
+            timestamp,
+            Arrays.asList("dim1", "dim2"),
+            new HashMap<String,Object>(){{put("dim1", null); put("dim2", 1);}}
+        )
+    );
+    toPersist1.add(
+        new MapBasedInputRow(
+            timestamp,
+            Arrays.asList("dim1", "dim2"),
+            new HashMap<String,Object>(){{put("dim1", null); put("dim2", 2);}}
+        )
+    );
+    toPersist1.add(
+        new MapBasedInputRow(
+            timestamp,
+            Arrays.asList("dim1", "dim2"),
+            new HashMap<String,Object>(){{put("dim1", "a"); put("dim2", 3);}}
+        )
+    );
+    QueryableIndex index1 = closer.closeLater(
+        IndexIO.loadIndex(
+            IndexMaker.persist(
+                toPersist1,
+                temporaryFolder.newFolder(),
+                null,
+                indexSpec
+            )
+        )
+    );
+    IndexMerger.mergeQueryableIndex(
+        Arrays.asList(index1),
+        new AggregatorFactory[]{new CountAggregatorFactory("count")},
+        temporaryFolder.newFolder(),
+        indexSpec
+    );
   }
 
   @Test
